@@ -8,6 +8,8 @@
 #include "esp_http_server.h"
 #include <WiFi.h>
 #include <ESPmDNS.h>
+#include <ArduinoOTA.h>
+#include <Update.h>
 #include <lwip/sockets.h>
 #include "wifi_secrets.h"
 
@@ -55,17 +57,22 @@ static esp_err_t status_handler(httpd_req_t *req) {
   return httpd_resp_send(req, body, n);
 }
 
-// The local network drops packets over ~600 bytes (measured: 800B pings
-// lose 66%, 1200B lose 100%). Stream in small paced chunks so every TCP
-// segment stays under that threshold.
-static const size_t CHUNK = 512;
+// Chunked sender. On a clean link (phone hotspot: 0% loss at 1400B)
+// full-MSS chunks with no pacing are fine. If moving back to a network
+// that drops large packets (the venue WiFi lost 66% of 800B pings),
+// drop CHUNK to 512 and PACE_MS to 2.
+// Full-MSS chunks, no pacing: current power bank holds the rail fine
+// (tested 2026-07-18). If reverting to a saggy supply, see README —
+// drop CHUNK to 512 and PACE_MS to 5.
+static const size_t CHUNK = 1436;
+static const uint32_t PACE_MS = 0;
 
 static esp_err_t send_paced(httpd_req_t *req, const char *data, size_t len) {
   for (size_t off = 0; off < len; off += CHUNK) {
     esp_err_t res = httpd_resp_send_chunk(req, data + off,
                                           min(CHUNK, len - off));
     if (res != ESP_OK) return res;
-    delay(2);  // let each chunk leave as its own small segment
+    if (PACE_MS) delay(PACE_MS);
   }
   return ESP_OK;
 }
@@ -97,6 +104,43 @@ static esp_err_t stream_handler(httpd_req_t *req) {
   }
 }
 
+// HTTP-push OTA: the phone hotspot blocks device->laptop connections,
+// which breaks classic espota. Here the laptop pushes instead:
+//   curl -X POST --data-binary @firmware.bin \
+//        "http://<ip>/update?pass=esp32cam123"
+static esp_err_t update_handler(httpd_req_t *req) {
+  char query[64] = {0};
+  httpd_req_get_url_query_str(req, query, sizeof(query));
+  if (strstr(query, "pass=esp32cam123") == nullptr) {
+    httpd_resp_set_status(req, "403 Forbidden");
+    return httpd_resp_send(req, "bad pass\n", HTTPD_RESP_USE_STRLEN);
+  }
+  if (!Update.begin(req->content_len)) {
+    httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_send(req, "begin failed\n", HTTPD_RESP_USE_STRLEN);
+  }
+  static uint8_t buf[4096];
+  size_t remaining = req->content_len;
+  while (remaining > 0) {
+    int n = httpd_req_recv(req, (char *)buf,
+                           min(remaining, sizeof(buf)));
+    if (n <= 0 || Update.write(buf, n) != (size_t)n) {
+      Update.abort();
+      httpd_resp_set_status(req, "500 Internal Server Error");
+      return httpd_resp_send(req, "write failed\n", HTTPD_RESP_USE_STRLEN);
+    }
+    remaining -= n;
+  }
+  if (!Update.end(true)) {
+    httpd_resp_set_status(req, "500 Internal Server Error");
+    return httpd_resp_send(req, "end failed\n", HTTPD_RESP_USE_STRLEN);
+  }
+  httpd_resp_send(req, "ok, rebooting\n", HTTPD_RESP_USE_STRLEN);
+  delay(500);
+  ESP.restart();
+  return ESP_OK;
+}
+
 static void start_server() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   httpd_handle_t server = nullptr;
@@ -107,13 +151,32 @@ static void start_server() {
   httpd_uri_t index_uri = {"/", HTTP_GET, index_handler, nullptr};
   httpd_uri_t status_uri = {"/status", HTTP_GET, status_handler, nullptr};
   httpd_uri_t stream_uri = {"/stream", HTTP_GET, stream_handler, nullptr};
+  httpd_uri_t update_uri = {"/update", HTTP_POST, update_handler, nullptr};
   httpd_register_uri_handler(server, &index_uri);
   httpd_register_uri_handler(server, &status_uri);
   httpd_register_uri_handler(server, &stream_uri);
+  httpd_register_uri_handler(server, &update_uri);
+}
+
+// Onboard flash LED (bright white, front) as a no-network heartbeat:
+// 3 quick blinks at boot, then a short blip every 2 s from loop().
+// On a power bank: no blinks ever = chip not booting; boot blinks that
+// stop = crash/brownout later; steady blipping = alive, check WiFi.
+#define FLASH_LED_GPIO 4
+
+static void blink(int times, int ms) {
+  for (int i = 0; i < times; i++) {
+    digitalWrite(FLASH_LED_GPIO, HIGH);
+    delay(ms);
+    digitalWrite(FLASH_LED_GPIO, LOW);
+    delay(ms);
+  }
 }
 
 void setup() {
   Serial.begin(115200);
+  pinMode(FLASH_LED_GPIO, OUTPUT);
+  blink(3, 120);
 
   camera_config_t config = {};
   config.ledc_channel = LEDC_CHANNEL_0;
@@ -136,35 +199,65 @@ void setup() {
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_QVGA;  // 320x240 while the WiFi link is lossy
+  config.frame_size = FRAMESIZE_VGA;  // 640x480; new bank sustains it
   config.jpeg_quality = 12;
   config.fb_count = psramFound() ? 2 : 1;
   config.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
   config.grab_mode = CAMERA_GRAB_LATEST;
 
+  // Do not halt on camera failure: WiFi must come up regardless so the
+  // board stays reachable (/status reports fb_ok=0 for diagnosis).
   esp_err_t err = esp_camera_init(&config);
   if (err != ESP_OK) {
-    while (true) {
-      Serial.printf("CAMERA_INIT_FAILED err=0x%x\n", err);
-      delay(2000);
-    }
+    Serial.printf("CAMERA_INIT_FAILED err=0x%x\n", err);
   }
 
-  // Hotspot always available; STA join keeps retrying in loop() forever.
-  WiFi.mode(WIFI_AP_STA);
+  // Station-only: AP_STA mode forced the hotspot and the join onto one
+  // radio channel and broke association at the venue. The hotspot now
+  // only starts as a fallback (see loop) if the join fails for 60 s.
+  WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);  // power-save off: cuts latency from ~300ms to ~5ms
-  WiFi.softAP(AP_SSID, AP_PASS);
-  Serial.printf("AP_IP %s ssid=%s pass=%s\n",
-                WiFi.softAPIP().toString().c_str(), AP_SSID, AP_PASS);
+  // Reduced TX power: the power bank browns the chip out on full-power
+  // transmit bursts. 11dBm halves the current spike; plenty of link
+  // budget at rover-to-phone range. Set before the scan below so probe
+  // requests are quieter too.
+  WiFi.setTxPower(WIFI_POWER_11dBm);
+
+  // Diagnostics: print why associations fail, and whether we can even
+  // see the target SSID (weak/absent antenna shows up here as no hit).
+  WiFi.onEvent(
+      [](WiFiEvent_t e, WiFiEventInfo_t info) {
+        Serial.printf("STA_DISCONNECT reason=%d\n",
+                      info.wifi_sta_disconnected.reason);
+      },
+      WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+  int n = WiFi.scanNetworks();
+  Serial.printf("scan: %d networks\n", n);
+  for (int i = 0; i < n; i++) {
+    if (WiFi.SSID(i) == WIFI_SSID || i < 5) {
+      Serial.printf("  %s rssi=%d ch=%d\n", WiFi.SSID(i).c_str(),
+                    WiFi.RSSI(i), WiFi.channel(i));
+    }
+  }
+  // DHCP: the phone hotspot assigns its own subnet. (The venue-network
+  // static IP .223 config lived here; restore it if switching back.)
   WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   MDNS.begin("esp32cam");
   start_server();
+  // OTA: reflash over WiFi, no USB needed once mounted on the rover.
+  //   arduino-cli upload --fqbn esp32:esp32:esp32cam -p <board-ip> \
+  //     --upload-field password=esp32cam123 .
+  ArduinoOTA.setHostname("esp32cam");
+  ArduinoOTA.setPassword("esp32cam123");
+  ArduinoOTA.begin();
 }
 
 void loop() {
   static bool wasConnected = false;
+  static bool apStarted = false;
   static uint32_t lastAttempt = millis();
+  static uint32_t bootMs = millis();
   bool connected = WiFi.status() == WL_CONNECTED;
   if (connected && !wasConnected) {
     Serial.printf("STA_IP %s\n", WiFi.localIP().toString().c_str());
@@ -174,6 +267,20 @@ void loop() {
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     lastAttempt = millis();
   }
+  // Start the hotspot once the join outcome settles: right after a
+  // successful join (AP then shares the STA channel, so association
+  // isn't disrupted) or after 60 s of failing. Stream stays reachable
+  // at 192.168.4.1 either way.
+  if (!apStarted && (connected || millis() - bootMs > 60000)) {
+    apStarted = true;
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.softAP(AP_SSID, AP_PASS);
+    Serial.printf("AP_IP %s ssid=%s pass=%s\n",
+                  WiFi.softAPIP().toString().c_str(), AP_SSID, AP_PASS);
+  }
   wasConnected = connected;
-  delay(1000);
+  // No periodic heartbeat blink: the flash LED is a current spike the
+  // power bank doesn't need. Boot blinks remain as a power self-test.
+  ArduinoOTA.handle();
+  delay(20);
 }

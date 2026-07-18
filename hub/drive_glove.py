@@ -31,14 +31,15 @@ import argparse
 import json
 import pathlib
 import select
-import socket
 import sys
 import termios
 import time
 import tty
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+from hub.glove_link import GloveLink
 from hub.mapping import mix, scale_axis, throttle_from_tilt
+from hub.rover_link import DryRunLink, make_rover_link
 
 CONFIG_PATH = pathlib.Path(__file__).resolve().parent.parent / "config.json"
 
@@ -52,22 +53,11 @@ def main():
     cfg = json.loads(CONFIG_PATH.read_text())
     g, d, s = cfg["glove"], cfg["drive"], cfg["serial"]
 
-    ser = None
-    if not args.dry_run:
-        import serial
-        ser = serial.Serial(s["port"], s["baud"], timeout=0)
-        print(f"Opened {s['port']}. Waiting for Arduino reset...")
-        time.sleep(2.5)
-        ser.write(b"S\n")  # FR-18
+    rover = DryRunLink() if args.dry_run else make_rover_link(cfg)
+    rover.send("S\n")  # FR-18
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    if hasattr(socket, "SO_REUSEPORT"):  # let plot/listener run concurrently
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-    sock.bind(("", g["telemetry_port"]))
-    sock.setblocking(False)
+    link = GloveLink()
 
-    glove_ip = None
     last_packet = 0.0
     pkt_count = 0
     roll = pitch = 0.0
@@ -76,7 +66,6 @@ def main():
     keyboard_mode = False
     kb_left = kb_right = 0
     watchdog_note = ""
-    rx_buf = b""
 
     old_attrs = termios.tcgetattr(sys.stdin)
     tty.setcbreak(sys.stdin.fileno())
@@ -85,7 +74,8 @@ def main():
     try:
         next_send = time.monotonic()
         while True:
-            readable, _, _ = select.select([sock, sys.stdin], [], [], 0.005)
+            readable, _, _ = select.select(
+                link.sockets + [sys.stdin], [], [], 0.005)
 
             if sys.stdin in readable:
                 key = sys.stdin.read(1)
@@ -93,10 +83,8 @@ def main():
                     break
                 elif key == " ":
                     estop = not estop  # latched until pressed again (FR-5)
-                elif key == "c" and glove_ip:
-                    for _ in range(5):
-                        sock.sendto(b"CAL", (glove_ip, g["command_port"]))
-                        time.sleep(0.02)
+                elif key == "c":
+                    link.send_cal()
                 elif key == "k":
                     keyboard_mode = not keyboard_mode
                     kb_left = kb_right = 0
@@ -107,22 +95,12 @@ def main():
                         "a": (-sp, sp), "d": (sp, -sp),
                         "x": (0, 0)}[key]
 
-            if sock in readable:
-                while True:
-                    try:
-                        data, addr = sock.recvfrom(1024)
-                    except BlockingIOError:
-                        break
-                    try:
-                        msg = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    glove_ip = addr[0]
-                    last_packet = time.monotonic()
-                    pkt_count += 1
-                    roll = msg.get("roll", 0.0)
-                    pitch = msg.get("pitch", 0.0)
-                    calibrating = bool(msg.get("cal"))
+            for msg in link.poll():
+                last_packet = time.monotonic()
+                pkt_count += 1
+                roll = msg.get("roll", 0.0)
+                pitch = msg.get("pitch", 0.0)
+                calibrating = bool(msg.get("cal"))
 
             now = time.monotonic()
             glove_fresh = (now - last_packet) < g["timeout_s"]
@@ -149,7 +127,7 @@ def main():
                 steer = scale_axis(g["roll_sign"] * roll,
                                    g["deadzone_deg"], g["full_speed_deg"])
                 left, right = mix(throttle, steer, d["max_speed"],
-                                  d["min_pwm"])
+                                  d["min_pwm"], d.get("turn_gain", 2.0))
                 mode = "GLOVE"
                 if left == 0 and right == 0:
                     state = "STOPPED (tilted back)"
@@ -162,20 +140,15 @@ def main():
                 else:
                     state = "DRIVING"
 
-            # --- serial receive (heartbeat / watchdog) ---
-            if ser:
-                rx_buf += ser.read(256)
-                while b"\n" in rx_buf:
-                    line, rx_buf = rx_buf.split(b"\n", 1)
-                    if line.strip() == b"W":
-                        watchdog_note = "WATCHDOG "
+            # --- rover receive (heartbeat / watchdog) ---
+            for line in rover.poll_lines():
+                if line == "W":
+                    watchdog_note = "WATCHDOG "
 
             # --- fixed-rate send ---
             if now >= next_send:
                 next_send = now + 1.0 / s["send_hz"]
-                cmd = f"M,{left},{right}\n"
-                if ser:
-                    ser.write(cmd.encode())
+                rover.send(f"M,{left},{right}\n")
                 age = time.monotonic() - last_packet if pkt_count else -1
                 sys.stdout.write(
                     f"\r{watchdog_note}[{mode:8s}] "
@@ -186,13 +159,11 @@ def main():
                 watchdog_note = ""
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_attrs)
-        if ser:
-            try:
-                ser.write(b"S\n")
-                ser.flush()
-            except Exception:
-                pass
-            ser.close()
+        try:
+            rover.send("S\n")
+        except Exception:
+            pass
+        rover.close()
         print("\nStopped.")
 
 

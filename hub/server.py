@@ -123,6 +123,7 @@ class Hub:
         period = 1.0 / hz
         max_speed = self.cfg["drive"]["max_speed"]
         min_pwm = self.cfg["drive"]["min_pwm"]
+        turn_gain = self.cfg["drive"].get("turn_gain", 1.0)
         servo = self.cfg["rover"].get("servo", {})
         yaw_scale = servo.get("yaw_scale", 1.0)
         pitch_scale = servo.get("pitch_scale", 1.0)
@@ -142,7 +143,8 @@ class Hub:
                     left, right = glove_pwm
                 elif now < st.manual_until:
                     left, right = v_omega_to_pwm(
-                        st.manual_v, st.manual_omega, max_speed, min_pwm
+                        st.manual_v, st.manual_omega, max_speed, min_pwm,
+                        turn_gain
                     )
 
             st.left, st.right = left, right

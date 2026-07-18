@@ -36,9 +36,10 @@ void setLeft(int speed) {
   analogWrite(ENA, abs(speed));
 }
 
+// Right side wired reversed relative to left: polarity flipped here.
 void setRight(int speed) {
-  digitalWrite(IN3, speed >= 0 ? HIGH : LOW);
-  digitalWrite(IN4, speed >= 0 ? LOW : HIGH);
+  digitalWrite(IN3, speed >= 0 ? LOW : HIGH);
+  digitalWrite(IN4, speed >= 0 ? HIGH : LOW);
   analogWrite(ENB, abs(speed));
 }
 

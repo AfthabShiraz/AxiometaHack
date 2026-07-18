@@ -5,12 +5,14 @@
     "send_hz": 20
   },
   "rover": {
-    "transport": "serial",
+    "transport": "udp",
     "port": "/dev/cu.usbserial-130",
     "baud": 115200,
     "send_hz": 20,
-    "host": "192.168.4.1",
-    "udp_port": 5007,
+    "host": "rover.local",
+    "udp_port": 5006,
+    "bridge_host": "rover.local",
+    "bridge_port": 5006,
     "servos_enabled": true,
     "servo": {
       "pan_min": -90,
@@ -33,9 +35,10 @@
     "roll_sign": 1
   },
   "drive": {
-    "max_speed": 150,
-    "min_pwm": 80,
-    "keyboard_speed": 150
+    "max_speed": 190,
+    "min_pwm": 85,
+    "turn_gain": 2.0,
+    "keyboard_speed": 190
   },
   "camera": {
     "stream_url": "http://esp32cam.local/stream"

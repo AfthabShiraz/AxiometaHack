@@ -19,12 +19,11 @@ def throttle_from_tilt(tilt_back, brake_start, brake_full):
     return 1.0 - (tilt_back - brake_start) / (brake_full - brake_start)
 
 
-def mix(throttle, steer, max_speed, min_pwm):
+def mix(throttle, steer, max_speed, min_pwm, turn_gain=1.0):
     """throttle/steer in -1..1 -> (left, right) PWM with stall floor."""
-    left = throttle + steer
-    right = throttle - steer
-    biggest = max(1.0, abs(left), abs(right))
-    left, right = left / biggest, right / biggest
+    steer_eff = steer * turn_gain
+    left = max(-1.0, min(1.0, throttle + steer_eff))
+    right = max(-1.0, min(1.0, throttle - steer_eff))
 
     def to_pwm(v):
         if abs(v) < 1e-3:
@@ -35,6 +34,6 @@ def mix(throttle, steer, max_speed, min_pwm):
     return to_pwm(left), to_pwm(right)
 
 
-def v_omega_to_pwm(v, omega, max_speed, min_pwm):
+def v_omega_to_pwm(v, omega, max_speed, min_pwm, turn_gain=1.0):
     """Normalized v/omega in -1..1 -> (left, right) PWM."""
-    return mix(v, omega, max_speed, min_pwm)
+    return mix(v, omega, max_speed, min_pwm, turn_gain)

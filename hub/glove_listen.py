@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Listen for glove UDP telemetry (port 5005) and report rate + contents.
+"""Listen for glove telemetry and report rate + contents.
 
-Prints every 25th packet plus a once-per-second summary of receive rate,
-sequence gaps (lost packets), and sender address.
+Subscribes to the glove (unicast; broadcast fallback) via GloveLink.
+Prints every 25th packet plus a once-per-second summary of receive rate
+and sequence gaps (lost packets).
 
 Keys:
   c  request recalibration — the glove waits 5 s (get your hand into the
@@ -10,68 +11,48 @@ Keys:
   q  quit
 """
 
-import json
 import select
-import socket
 import sys
 import termios
 import time
 import tty
 
-TELEMETRY_PORT = 5005
-COMMAND_PORT = 5006
+from glove_link import GloveLink
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-if hasattr(socket, "SO_REUSEPORT"):
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-sock.bind(("", TELEMETRY_PORT))
-sock.setblocking(False)
-print(f"Listening on UDP :{TELEMETRY_PORT} ... "
-      "('c' = recalibrate in 5s, 'q' = quit)")
+link = GloveLink()
+print("Subscribing to glove ... ('c' = recalibrate in 5s, 'q' = quit)")
 
 count = 0
 lost = 0
 last_seq = None
-glove_addr = None
 window_start = time.monotonic()
 
 old_attrs = termios.tcgetattr(sys.stdin)
 tty.setcbreak(sys.stdin.fileno())
 try:
     while True:
-        readable, _, _ = select.select([sock, sys.stdin], [], [], 1.0)
+        readable, _, _ = select.select(link.sockets + [sys.stdin], [], [], 1.0)
 
         if sys.stdin in readable:
             key = sys.stdin.read(1)
             if key == "q":
                 break
             elif key == "c":
-                if glove_addr is None:
-                    print("\rno glove seen yet, can't calibrate")
+                if link.send_cal():
+                    print(f"\rCAL sent to {link.glove_ip} — hold neutral "
+                          "pose, zeroing in 5s (then ~2s still for gyro)")
                 else:
-                    for _ in range(5):  # a few copies in case of loss
-                        sock.sendto(b"CAL", (glove_addr, COMMAND_PORT))
-                        time.sleep(0.02)
-                    print(f"\rCAL sent to {glove_addr} — hold neutral pose, "
-                          "zeroing in 5s (then ~2s still for gyro)")
+                    print("\rglove not found yet, can't calibrate")
 
-        if sock in readable:
-            data, addr = sock.recvfrom(1024)
-            glove_addr = addr[0]
+        for msg in link.poll():
             count += 1
-            try:
-                msg = json.loads(data)
-            except json.JSONDecodeError:
-                print(f"bad packet from {addr[0]}: {data[:80]!r}")
-                continue
             seq = msg.get("seq")
             if last_seq is not None and seq is not None and seq > last_seq + 1:
                 lost += seq - last_seq - 1
             last_seq = seq
             if count % 25 == 0:
                 tag = "  [CALIBRATING]" if msg.get("cal") else ""
-                print(f"  {addr[0]}  {msg}{tag}")
+                print(f"  {link.glove_ip}  {msg}{tag}")
 
         now = time.monotonic()
         if now - window_start >= 1.0:

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 import time
-from typing import Optional
 
 log = logging.getLogger("hub.rover")
 
@@ -50,10 +50,8 @@ class RoverLink:
             self.connected = False
 
     async def _open_udp(self):
-        import socket
-
-        host = self.cfg.get("host", "192.168.4.1")
-        port = self.cfg.get("udp_port", 5007)
+        host = self.cfg.get("host", self.cfg.get("bridge_host", "192.168.4.1"))
+        port = self.cfg.get("udp_port", self.cfg.get("bridge_port", 5007))
         self._udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._udp.setblocking(False)
         self._udp_addr = (host, port)
@@ -151,3 +149,124 @@ class RoverLink:
             "heartbeat_age_s": hb_age,
             "watchdog": self.watchdog_tripped,
         }
+
+
+class SerialLink:
+    def __init__(self, port, baud):
+        import serial
+        self.ser = serial.Serial(port, baud, timeout=0)
+        self.buf = b""
+        print(f"Opened {port}. Waiting for Arduino reset...")
+        time.sleep(2.5)  # opening the port resets the Uno via DTR
+
+    def send(self, line):
+        self.ser.write(line.encode())
+
+    def poll_lines(self):
+        self.buf += self.ser.read(256)
+        lines = []
+        while b"\n" in self.buf:
+            raw, self.buf = self.buf.split(b"\n", 1)
+            raw = raw.strip()
+            if raw:
+                lines.append(raw.decode(errors="replace"))
+        return lines
+
+    def close(self):
+        try:
+            self.ser.flush()
+        except Exception:
+            pass
+        self.ser.close()
+
+
+class UdpBridgeLink:
+    """Sync UDP bridge used by the standalone glove console."""
+
+    HELLO_PORT = 5011
+    RESOLVE_RETRY_S = 5.0
+
+    def __init__(self, host, port):
+        self.host = host      # mDNS fallback only
+        self.port = port
+        self.addr = None      # (ip, port) learned from HELLO
+        self._last_resolve = 0.0
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(("", self.HELLO_PORT))
+        self.sock.setblocking(False)
+        print(f"Rover bridge: waiting for rover HELLO on :{self.HELLO_PORT} "
+              f"(mDNS fallback {host}:{port})")
+
+    def _resolve_fallback(self):
+        now = time.monotonic()
+        if now - self._last_resolve < self.RESOLVE_RETRY_S:
+            return
+        self._last_resolve = now
+        try:
+            ip = socket.getaddrinfo(self.host, None, socket.AF_INET)[0][4][0]
+            self.addr = (ip, self.port)
+        except OSError:
+            pass
+
+    def send(self, line):
+        if self.addr is None:
+            self._resolve_fallback()
+            if self.addr is None:
+                return
+        try:
+            self.sock.sendto(line.encode(), self.addr)
+        except OSError:
+            pass
+
+    def poll_lines(self):
+        lines = []
+        while True:
+            try:
+                data, addr = self.sock.recvfrom(256)
+            except (BlockingIOError, OSError):
+                break
+            for raw in data.split(b"\n"):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                if raw.startswith(b"HELLO"):
+                    # "HELLO rover <cmd_port>" advertises the command port.
+                    parts = raw.split()
+                    try:
+                        cmd_port = int(parts[2])
+                    except (IndexError, ValueError):
+                        cmd_port = self.port
+                    new_addr = (addr[0], cmd_port)
+                    if self.addr != new_addr:
+                        print(f"\nrover announced: commands to "
+                              f"{new_addr[0]}:{new_addr[1]}")
+                    self.addr = new_addr
+                    continue
+                lines.append(raw.decode(errors="replace"))
+        return lines
+
+    def close(self):
+        self.sock.close()
+
+
+class DryRunLink:
+    def send(self, line):
+        pass
+
+    def poll_lines(self):
+        return []
+
+    def close(self):
+        pass
+
+
+def make_rover_link(cfg):
+    transport = cfg.get("rover", {}).get("transport", "serial")
+    if transport == "udp":
+        r = cfg["rover"]
+        host = r.get("bridge_host", r.get("host", "192.168.4.1"))
+        port = r.get("bridge_port", r.get("udp_port", 5007))
+        return UdpBridgeLink(host, port)
+    s = cfg["serial"]
+    return SerialLink(s["port"], s["baud"])

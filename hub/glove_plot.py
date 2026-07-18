@@ -16,24 +16,17 @@ the band will mean "stopped" once the drive mapping exists.
 """
 
 import collections
-import json
-import socket
 import time
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
-TELEMETRY_PORT = 5005
-COMMAND_PORT = 5006
+from glove_link import GloveLink
+
 WINDOW_S = 15
 DEADZONE_DEG = 10
 
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-if hasattr(socket, "SO_REUSEPORT"):
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-sock.bind(("", TELEMETRY_PORT))
-sock.setblocking(False)
+link = GloveLink()
 
 t0 = time.monotonic()
 hist = collections.deque()  # (t, roll, pitch, yaw)
@@ -55,17 +48,9 @@ ax.legend(loc="upper left")
 
 
 def drain_socket():
-    while True:
-        try:
-            data, addr = sock.recvfrom(1024)
-        except BlockingIOError:
-            return
-        state["glove_ip"] = addr[0]
+    for msg in link.poll():
+        state["glove_ip"] = link.glove_ip
         state["rate_count"] += 1
-        try:
-            msg = json.loads(data)
-        except json.JSONDecodeError:
-            continue
         now = time.monotonic() - t0
         hist.append((now, msg.get("roll", 0.0), msg.get("pitch", 0.0),
                      msg.get("yaw", 0.0)))
@@ -94,19 +79,17 @@ def update(_frame):
         ax.set_title(f"{status}    ({state['rate']:.0f} Hz, "
                      f"{state['glove_ip']})")
     else:
-        ax.set_title("waiting for glove packets on UDP :5005 ...")
+        ax.set_title("waiting for glove telemetry ...")
     return l_roll, l_pitch, l_yaw
 
 
 def on_key(event):
     if event.key == "q":
         plt.close(fig)
-    elif event.key == "c" and state["glove_ip"]:
-        for _ in range(5):
-            sock.sendto(b"CAL", (state["glove_ip"], COMMAND_PORT))
-            time.sleep(0.02)
-        print(f"CAL sent to {state['glove_ip']} — neutral pose, "
-              "zeroing in 5s, then hold still ~2s")
+    elif event.key == "c":
+        if link.send_cal():
+            print(f"CAL sent to {link.glove_ip} — neutral pose, "
+                  "zeroing in 5s, then hold still ~2s")
 
 
 fig.canvas.mpl_connect("key_press_event", on_key)

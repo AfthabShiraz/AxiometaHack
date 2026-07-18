@@ -13,12 +13,17 @@
 // hold still — then re-measures gyro bias and adopts the current pose as
 // the new zero. Streaming pauses ~2 s during the bias measurement.
 //
+// Delivery: hub processes send "SUB" to :5006 every ~2 s; telemetry is
+// unicast back to each fresh subscriber (venue APs drop broadcast).
+// With no subscriber for 5 s it falls back to broadcasting to :5005.
+//
 // Serial (115200): prints WHO_AM_I, calibration, IP, and 2 s status lines.
 
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <ESPmDNS.h>
 #include <Wire.h>
+#include <esp_task_wdt.h>
 #include "wifi_secrets.h"
 
 const uint16_t TELEMETRY_PORT = 5005;
@@ -52,6 +57,36 @@ float gyroBias[3] = {0, 0, 0};
 bool imuOk = false;
 bool calPending = false;
 uint32_t calDueAt = 0;
+
+const int MAX_SUBS = 4;
+const uint32_t SUB_TIMEOUT_MS = 5000;
+struct Subscriber {
+  IPAddress ip;
+  uint16_t port;
+  uint32_t lastSeen;
+};
+Subscriber subs[MAX_SUBS];
+int subCount = 0;
+
+void touchSubscriber(IPAddress ip, uint16_t port) {
+  uint32_t now = millis();
+  for (int i = 0; i < subCount; i++) {
+    if (subs[i].ip == ip && subs[i].port == port) {
+      subs[i].lastSeen = now;
+      return;
+    }
+  }
+  if (subCount < MAX_SUBS) {
+    subs[subCount++] = {ip, port, now};
+    Serial.printf("subscriber %s:%u\n", ip.toString().c_str(), port);
+  } else {
+    // replace the stalest entry
+    int oldest = 0;
+    for (int i = 1; i < MAX_SUBS; i++)
+      if (subs[i].lastSeen < subs[oldest].lastSeen) oldest = i;
+    subs[oldest] = {ip, port, now};
+  }
+}
 
 void writeReg(uint8_t reg, uint8_t val) {
   Wire.beginTransmission(MPU_ADDR);
@@ -108,7 +143,17 @@ void calibrateGyro() {
 void setup() {
   Serial.begin(115200);
 
+  // Hang protection: if loop() ever stalls (e.g. I2C lock-up from a
+  // jostled wire), reboot after 5 s. WiFi rejoins automatically and the
+  // hub stops the robot while telemetry is missing (FR-16), so a reboot
+  // is safe and self-healing.
+  esp_task_wdt_config_t wdt_cfg = {
+      .timeout_ms = 5000, .idle_core_mask = 0, .trigger_panic = true};
+  esp_task_wdt_reconfigure(&wdt_cfg);
+  esp_task_wdt_add(NULL);  // watch the loop task
+
   Wire.begin(21, 22, 400000);
+  Wire.setTimeOut(50);  // ms; never block forever on a flaky IMU wire
   uint8_t who = readReg(REG_WHO_AM_I);
   // 0x71=MPU9250, 0x73=MPU9255, 0x70=MPU6500
   Serial.printf("WHO_AM_I=0x%02X\n", who);
@@ -134,6 +179,7 @@ void setup() {
   while (WiFi.status() != WL_CONNECTED) {
     delay(250);
     Serial.print(".");
+    esp_task_wdt_reset();  // joining can take longer than the WDT window
   }
   Serial.printf("\nGLOVE_IP %s\n", WiFi.localIP().toString().c_str());
   MDNS.begin("glove");
@@ -142,15 +188,19 @@ void setup() {
 }
 
 void checkCommands() {
-  int len = cmdUdp.parsePacket();
-  if (len <= 0) return;
-  char buf[16] = {0};
-  cmdUdp.read(buf, sizeof(buf) - 1);
-  if (strncmp(buf, "CAL", 3) == 0 && !calPending) {
-    calPending = true;
-    calDueAt = millis() + CAL_DELAY_MS;
-    Serial.printf("CAL received: hold neutral pose, zeroing in %lu s\n",
-                  (unsigned long)(CAL_DELAY_MS / 1000));
+  while (true) {
+    int len = cmdUdp.parsePacket();
+    if (len <= 0) return;
+    char buf[16] = {0};
+    cmdUdp.read(buf, sizeof(buf) - 1);
+    // any sender becomes/refreshes a telemetry subscriber
+    touchSubscriber(cmdUdp.remoteIP(), cmdUdp.remotePort());
+    if (strncmp(buf, "CAL", 3) == 0 && !calPending) {
+      calPending = true;
+      calDueAt = millis() + CAL_DELAY_MS;
+      Serial.printf("CAL received: hold neutral pose, zeroing in %lu s\n",
+                    (unsigned long)(CAL_DELAY_MS / 1000));
+    }
   }
 }
 
@@ -186,6 +236,7 @@ void updateFilter() {
 }
 
 void loop() {
+  esp_task_wdt_reset();
   uint32_t now = millis();
 
   if (imuOk) updateFilter();
@@ -201,15 +252,26 @@ void loop() {
                      (unsigned long)seq++, (unsigned long)now,
                      roll - rollNeutral, pitch - pitchNeutral, yaw,
                      calPending ? 1 : 0);
-    udp.beginPacket(IPAddress(255, 255, 255, 255), TELEMETRY_PORT);
-    udp.write((const uint8_t *)buf, n);
-    udp.endPacket();
+    bool sentUnicast = false;
+    for (int i = 0; i < subCount; i++) {
+      if (now - subs[i].lastSeen < SUB_TIMEOUT_MS) {
+        udp.beginPacket(subs[i].ip, subs[i].port);
+        udp.write((const uint8_t *)buf, n);
+        udp.endPacket();
+        sentUnicast = true;
+      }
+    }
+    if (!sentUnicast) {  // nobody subscribed: fall back to broadcast
+      udp.beginPacket(IPAddress(255, 255, 255, 255), TELEMETRY_PORT);
+      udp.write((const uint8_t *)buf, n);
+      udp.endPacket();
+    }
   }
 
   if (now - lastStatus >= 2000) {
     lastStatus = now;
-    Serial.printf("status wifi=%d rssi=%d imu=%d rpy=%.1f,%.1f,%.1f\n",
+    Serial.printf("status wifi=%d rssi=%d imu=%d seq=%lu rpy=%.1f,%.1f,%.1f\n",
                   WiFi.status() == WL_CONNECTED, WiFi.RSSI(), imuOk,
-                  roll, pitch, yaw);
+                  (unsigned long)seq, roll, pitch, yaw);
   }
 }

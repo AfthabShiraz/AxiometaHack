@@ -103,7 +103,13 @@ class GloveInput:
         steer = scale_axis(
             g["roll_sign"] * self.roll, g["deadzone_deg"], g["full_speed_deg"]
         )
-        return mix(throttle, steer, self.drive["max_speed"], self.drive["min_pwm"])
+        return mix(
+            throttle,
+            steer,
+            self.drive["max_speed"],
+            self.drive["min_pwm"],
+            self.drive.get("turn_gain", 1.0),
+        )
 
     async def send_cal(self):
         if not self._sock or not self.glove_ip:
