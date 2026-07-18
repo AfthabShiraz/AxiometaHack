@@ -228,15 +228,9 @@ function connectWs() {
   ws = new WebSocket(url);
   ws.onopen = () => {
     setStatus(true, "HUB CONNECTED");
-    enterBtn.disabled = !navigator.xr;
-    if (!navigator.xr) {
-      // still allow flat fallback
-      enterBtn.disabled = false;
-      enterBtn.textContent = "Open Flat FPV";
-    } else {
-      enterBtn.textContent = "Enter Rover View";
-      enterBtn.disabled = false;
-    }
+    // Always enable once hub is up — flat FPV if XR unavailable
+    enterBtn.disabled = false;
+    enterBtn.textContent = navigator.xr ? "Enter Rover View" : "Open Flat FPV";
   };
   ws.onclose = () => {
     setStatus(false, "RECONNECTING…");

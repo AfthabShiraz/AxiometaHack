@@ -33,7 +33,6 @@ class RoverLink:
             await self._open_serial()
         else:
             await self._open_udp()
-        await self.stop()
 
     async def _open_serial(self):
         import serial
