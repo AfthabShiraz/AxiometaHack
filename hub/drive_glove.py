@@ -162,12 +162,16 @@ def main():
             if estop or calibrating:
                 left = right = 0
                 mode = "E-STOP" if estop else "CAL"
+                state = "STOPPED (press space to arm)" if estop \
+                    else "STOPPED (calibrating)"
             elif keyboard_mode:
                 left, right = kb_left, kb_right
                 mode = "KEYBD"
+                state = "DRIVING" if (left or right) else "STOPPED"
             elif not glove_fresh:
                 left = right = 0  # FR-16
                 mode = "NO GLOVE"
+                state = "STOPPED (no telemetry)"
             else:
                 tilt_back = g["pitch_sign"] * pitch
                 throttle = throttle_from_tilt(tilt_back,
@@ -178,6 +182,16 @@ def main():
                 left, right = mix(throttle, steer, d["max_speed"],
                                   d["min_pwm"])
                 mode = "GLOVE"
+                if left == 0 and right == 0:
+                    state = "STOPPED (tilted back)"
+                elif throttle < 1.0:
+                    state = "BRAKING"
+                elif steer > 0.05:
+                    state = "TURNING RIGHT"
+                elif steer < -0.05:
+                    state = "TURNING LEFT"
+                else:
+                    state = "DRIVING"
 
             # --- serial receive (heartbeat / watchdog) ---
             if ser:
@@ -196,8 +210,8 @@ def main():
                 age = time.monotonic() - last_packet if pkt_count else -1
                 sys.stdout.write(
                     f"\r{watchdog_note}[{mode:8s}] "
-                    f"roll {roll:+6.1f} pitch {pitch:+6.1f} -> "
-                    f"M,{left:>4},{right:>4}  "
+                    f"L{left:+4d} R{right:+4d}  {state:28s} "
+                    f"roll {roll:+6.1f} pitch {pitch:+6.1f}  "
                     f"pkts {pkt_count} age {age:4.2f}s   ")
                 sys.stdout.flush()
                 watchdog_note = ""
