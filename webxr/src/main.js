@@ -13,10 +13,15 @@ function resolveHub() {
   return localStorage.getItem(STORAGE_KEY) || "";
 }
 
+/** Normalize hub URL (http/https/ws/wss) to an http(s) URL for parsing. */
+function parseHubUrl(hub) {
+  const s = String(hub).trim().replace(/^wss:/i, "https:").replace(/^ws:/i, "http:");
+  return new URL(s);
+}
+
 function httpOrigin(hub) {
   if (!hub) return location.origin;
-  const u = new URL(hub.replace(/^ws/i, "http"));
-  return u.origin;
+  return parseHubUrl(hub).origin;
 }
 
 function makeWsUrl(hub) {
@@ -24,9 +29,11 @@ function makeWsUrl(hub) {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     return `${proto}//${location.host}/ws`;
   }
-  if (hub.includes("/ws")) return hub.replace(/^http/, "ws");
-  const u = new URL(hub.replace(/^ws/i, "http"));
+  const u = parseHubUrl(hub);
   const proto = u.protocol === "https:" ? "wss:" : "ws:";
+  if (u.pathname.includes("/ws")) {
+    return `${proto}//${u.host}${u.pathname}${u.search}`;
+  }
   return `${proto}//${u.host}/ws`;
 }
 
@@ -228,9 +235,15 @@ function connectWs() {
   ws = new WebSocket(url);
   ws.onopen = () => {
     setStatus(true, "HUB CONNECTED");
-    // Always enable once hub is up — flat FPV if XR unavailable
-    enterBtn.disabled = false;
-    enterBtn.textContent = navigator.xr ? "Enter Rover View" : "Open Flat FPV";
+    enterBtn.disabled = !navigator.xr;
+    if (!navigator.xr) {
+      // still allow flat fallback
+      enterBtn.disabled = false;
+      enterBtn.textContent = "Open Flat FPV";
+    } else {
+      enterBtn.textContent = "Enter Rover View";
+      enterBtn.disabled = false;
+    }
   };
   ws.onclose = () => {
     setStatus(false, "RECONNECTING…");

@@ -3,13 +3,19 @@
   const hubParam = params.get("hub");
   if (hubParam) localStorage.setItem("rover_hub", hubParam);
 
+  function parseHubUrl(hub) {
+    const s = String(hub).trim().replace(/^wss:/i, "https:").replace(/^ws:/i, "http:");
+    return new URL(s);
+  }
+
   function hubBase() {
     const stored = localStorage.getItem("rover_hub");
     if (stored) {
-      // allow wss://host or https://host
+      // allow wss://host or https://host; match page protocol for camera fetch
       try {
-        const u = new URL(stored.replace(/^ws/, "http"));
-        return u.origin.replace(/^http/, location.protocol === "https:" ? "https" : "http");
+        const u = parseHubUrl(stored);
+        const proto = location.protocol === "https:" ? "https:" : "http:";
+        return `${proto}//${u.host}`;
       } catch (_) {}
     }
     return "";
@@ -18,10 +24,14 @@
   function wsUrl() {
     const stored = localStorage.getItem("rover_hub");
     if (stored) {
-      if (stored.startsWith("ws")) return stored.replace(/\/?$/, "") + (stored.includes("/ws") ? "" : "/ws");
-      const u = new URL(stored);
-      const proto = u.protocol === "https:" ? "wss:" : "ws:";
-      return `${proto}//${u.host}/ws`;
+      try {
+        const u = parseHubUrl(stored);
+        const proto = u.protocol === "https:" ? "wss:" : "ws:";
+        if (u.pathname.includes("/ws")) {
+          return `${proto}//${u.host}${u.pathname}${u.search}`;
+        }
+        return `${proto}//${u.host}/ws`;
+      } catch (_) {}
     }
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     return `${proto}//${location.host}/ws`;
