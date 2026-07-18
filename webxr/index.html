@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Rover View — Axiometa</title>
+  <style>
+    :root {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      color: #f4f7f2;
+      background: #0b100e;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; }
+    #app {
+      position: fixed; inset: 0;
+      background:
+        radial-gradient(ellipse at 30% 20%, #1a3328, transparent 50%),
+        #0b100e;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+    #ui {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 1rem; padding: 1.5rem; text-align: center;
+      pointer-events: none;
+    }
+    #ui > * { pointer-events: auto; }
+    h1 {
+      font-size: clamp(1.8rem, 6vw, 2.8rem);
+      margin: 0;
+      letter-spacing: 0.06em;
+      font-weight: 800;
+    }
+    p { max-width: 28rem; color: #b7c4b8; line-height: 1.4; margin: 0; }
+    #status {
+      font-size: 0.85rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 0.4rem 0.85rem;
+      border: 1px solid #3a4f42;
+      border-radius: 999px;
+      color: #9fb8a6;
+    }
+    #status.ok { border-color: #5ce08a; color: #5ce08a; }
+    #status.bad { border-color: #ff4d6d; color: #ff4d6d; }
+    #enter {
+      appearance: none;
+      border: none;
+      background: #c8f542;
+      color: #10160e;
+      font-size: 1.25rem;
+      font-weight: 800;
+      letter-spacing: 0.04em;
+      padding: 1.1rem 2rem;
+      border-radius: 8px;
+      cursor: pointer;
+      min-width: min(90vw, 320px);
+      box-shadow: 0 12px 40px rgba(200, 245, 66, 0.25);
+    }
+    #enter:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    #hub-row {
+      display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center;
+      max-width: 420px; width: 100%;
+    }
+    #hub-input {
+      flex: 1; min-width: 200px;
+      padding: 0.7rem 0.85rem;
+      border-radius: 6px;
+      border: 1px solid #3a4f42;
+      background: #142019;
+      color: #f4f7f2;
+      font: inherit;
+    }
+    .hint { font-size: 0.8rem; color: #7e9084; }
+    #overlay-hud {
+      position: absolute; left: 50%; top: 12%;
+      transform: translateX(-50%);
+      text-align: center;
+      pointer-events: none;
+      display: none;
+      z-index: 2;
+    }
+    #overlay-hud .big {
+      font-size: 1.4rem; font-weight: 800;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      text-shadow: 0 2px 12px #000;
+    }
+    #overlay-hud .big.bad { color: #ff4d6d; }
+    #overlay-hud .big.warn { color: #ffc857; }
+    #overlay-hud .big.ok { color: #5ce08a; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="ui">
+      <div id="status" class="bad">HUB OFFLINE</div>
+      <h1>ROVER VIEW</h1>
+      <p>Passthrough + robot POV. One tap to enter. Hub URL is saved after the first setup.</p>
+      <div id="hub-row">
+        <input id="hub-input" type="url" placeholder="https://….trycloudflare.com or leave blank for same host" />
+      </div>
+      <button id="enter" disabled>Enter Rover View</button>
+      <p class="hint">On Quest: open this page in Browser → tap Enter. Cast via Meta Horizon app for the second screen.</p>
+    </div>
+    <div id="overlay-hud"><div class="big" id="hud-msg"></div></div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

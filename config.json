@@ -4,6 +4,23 @@
     "baud": 115200,
     "send_hz": 20
   },
+  "rover": {
+    "transport": "serial",
+    "port": "/dev/cu.usbserial-130",
+    "baud": 115200,
+    "send_hz": 20,
+    "host": "192.168.4.1",
+    "udp_port": 5007,
+    "servos_enabled": true,
+    "servo": {
+      "pan_min": -90,
+      "pan_max": 90,
+      "tilt_min": -45,
+      "tilt_max": 45,
+      "yaw_scale": 1.0,
+      "pitch_scale": 1.0
+    }
+  },
   "glove": {
     "telemetry_port": 5005,
     "command_port": 5006,
@@ -19,5 +36,18 @@
     "max_speed": 150,
     "min_pwm": 80,
     "keyboard_speed": 150
+  },
+  "camera": {
+    "stream_url": "http://esp32cam.local/stream"
+  },
+  "face": {
+    "enabled": true,
+    "host": "255.255.255.255",
+    "port": 5010
+  },
+  "hub": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "state_hz": 15
   }
 }

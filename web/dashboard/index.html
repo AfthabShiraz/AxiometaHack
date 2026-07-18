@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rover Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">ROVER · LIVE</div>
+    <div id="conn" class="pill bad">DISCONNECTED</div>
+    <div id="estop-banner" class="pill bad hidden">E-STOP</div>
+    <div id="mode-pill" class="pill">teleop</div>
+  </header>
+
+  <main class="grid">
+    <section class="cam-panel">
+      <div class="label">Robot POV</div>
+      <img id="cam" alt="camera" src="/camera.mjpg" />
+      <div id="novideo" class="overlay hidden">NO VIDEO</div>
+    </section>
+
+    <aside class="side">
+      <section class="card">
+        <h2>Status</h2>
+        <dl id="status">
+          <div><dt>Rover</dt><dd id="s-rover">—</dd></div>
+          <div><dt>Glove</dt><dd id="s-glove">—</dd></div>
+          <div><dt>Camera</dt><dd id="s-cam">—</dd></div>
+          <div><dt>Motors</dt><dd id="s-motors">—</dd></div>
+          <div><dt>Look</dt><dd id="s-look">—</dd></div>
+        </dl>
+      </section>
+
+      <section class="card">
+        <h2>Safety</h2>
+        <button id="btn-estop" class="estop">E-STOP TOGGLE</button>
+        <button id="btn-arm" class="secondary">Arm (clear e-stop)</button>
+      </section>
+
+      <section class="card">
+        <h2>Drive</h2>
+        <p class="hint">Hold WASD or use pads. Release to stop.</p>
+        <div class="pads">
+          <button data-drive="0,0" class="ghost">·</button>
+          <button data-drive="1,0">▲</button>
+          <button data-drive="0,0" class="ghost">·</button>
+          <button data-drive="0,-1">◀</button>
+          <button data-drive="0,0">■</button>
+          <button data-drive="0,1">▶</button>
+          <button data-drive="0,0" class="ghost">·</button>
+          <button data-drive="-1,0">▼</button>
+          <button data-drive="0,0" class="ghost">·</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Look</h2>
+        <label>Pan <input id="pan" type="range" min="-90" max="90" value="0" /></label>
+        <label>Tilt <input id="tilt" type="range" min="-45" max="45" value="0" /></label>
+      </section>
+
+      <section class="card">
+        <h2>Mode</h2>
+        <div class="row">
+          <button data-mode="teleop">Teleop</button>
+          <button data-mode="rescue">Rescue</button>
+          <button data-mode="companion">Companion</button>
+        </div>
+        <div class="row">
+          <button id="btn-mark" class="secondary">Mark victim</button>
+          <button id="btn-undo" class="secondary">Undo</button>
+          <button id="btn-cal" class="secondary">Cal glove</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Minimap</h2>
+        <canvas id="map" width="280" height="280"></canvas>
+      </section>
+    </aside>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

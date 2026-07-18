@@ -1,5 +1,15 @@
 __pycache__/
 *.py[cod]
+.venv/
+venv/
+.env
 
 # Local Wi-Fi credentials for ESP devices.
 wifi_secrets.h
+
+# WebXR
+webxr/node_modules/
+webxr/dist/
+
+# Logs
+logs/
