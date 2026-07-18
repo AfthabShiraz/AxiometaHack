@@ -1,0 +1,23 @@
+{
+  "serial": {
+    "port": "/dev/cu.usbserial-130",
+    "baud": 115200,
+    "send_hz": 20
+  },
+  "glove": {
+    "telemetry_port": 5005,
+    "command_port": 5006,
+    "timeout_s": 0.5,
+    "deadzone_deg": 10,
+    "full_speed_deg": 35,
+    "brake_start_deg": 10,
+    "brake_full_deg": 25,
+    "pitch_sign": -1,
+    "roll_sign": 1
+  },
+  "drive": {
+    "max_speed": 150,
+    "min_pwm": 80,
+    "keyboard_speed": 150
+  }
+}
