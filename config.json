@@ -52,5 +52,15 @@
     "host": "0.0.0.0",
     "port": 8000,
     "state_hz": 15
+  },
+  "quest": {
+    "port": 8443,
+    "pan_sign": 1,
+    "tilt_sign": -1,
+    "pan_scale": 1.5,
+    "tilt_scale": 1.0,
+    "pan_range": 170,
+    "tilt_range": 45,
+    "slew_deg_per_s": 300
   }
 }

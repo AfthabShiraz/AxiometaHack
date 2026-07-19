@@ -10,6 +10,7 @@ wifi_secrets.h
 # WebXR
 webxr/node_modules/
 webxr/dist/
+hub/certs/
 
 # Logs
 logs/

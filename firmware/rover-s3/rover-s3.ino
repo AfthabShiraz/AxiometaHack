@@ -215,9 +215,12 @@ void loop() {
     commanderIp = rxUdp.remoteIP();
     commanderPort = rxUdp.remotePort();
     lastPacketMs = millis();
+    bool isMotor = (buf[0] == 'M' || buf[0] == 'S');
     if (handleLine(buf)) {
-      lastCommandMs = millis();
-      watchdogTripped = false;
+      if (isMotor) {
+        lastCommandMs = millis();
+        watchdogTripped = false;
+      }
       reply("A");
     }
     // malformed lines are ignored and do NOT feed the watchdog
