@@ -45,7 +45,7 @@
     }
     #status.ok { border-color: #5ce08a; color: #5ce08a; }
     #status.bad { border-color: #ff4d6d; color: #ff4d6d; }
-    #enter {
+    #enter, .mode-btn {
       appearance: none;
       border: none;
       background: #c8f542;
@@ -63,6 +63,24 @@
       opacity: 0.45;
       cursor: not-allowed;
       box-shadow: none;
+    }
+    .step { display: flex; flex-direction: column; align-items: center; gap: 1rem; width: 100%; }
+    .mode-btn { display: flex; flex-direction: column; gap: 0.3rem; align-items: center; }
+    .mode-btn small {
+      font-size: 0.78rem; font-weight: 500; letter-spacing: 0.02em;
+      color: #33421c; text-transform: none;
+    }
+    .mode-btn.alt {
+      background: transparent;
+      color: #5ce08a;
+      border: 2px solid #5ce08a;
+      box-shadow: 0 12px 40px rgba(92, 224, 138, 0.15);
+    }
+    .mode-btn.alt small { color: #7e9084; }
+    #mode-back {
+      appearance: none; background: none; border: none; cursor: pointer;
+      color: #7e9084; font: inherit; font-size: 0.85rem;
+      text-decoration: underline; text-underline-offset: 3px;
     }
     #hub-row {
       display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center;
@@ -94,21 +112,57 @@
     #overlay-hud .big.bad { color: #ff4d6d; }
     #overlay-hud .big.warn { color: #ffc857; }
     #overlay-hud .big.ok { color: #5ce08a; }
+    #overlay-hud .sub {
+      margin-top: 0.3rem;
+      font-size: 0.85rem;
+      color: #b7c4b8;
+      text-shadow: 0 1px 8px #000;
+    }
+    #exit-btn {
+      pointer-events: auto;
+      margin-top: 0.6rem;
+      appearance: none; cursor: pointer;
+      background: rgba(8, 14, 12, 0.75);
+      border: 1px solid #3a4f42;
+      border-radius: 999px;
+      color: #9fb8a6;
+      font: inherit; font-size: 0.8rem;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      padding: 0.35rem 0.9rem;
+    }
   </style>
 </head>
 <body>
   <div id="app">
     <div id="ui">
-      <div id="status" class="bad">HUB OFFLINE</div>
-      <h1>ROVER VIEW</h1>
-      <p>Passthrough + robot POV. One tap to enter. Hub URL is saved after the first setup.</p>
-      <div id="hub-row">
-        <input id="hub-input" type="url" placeholder="https://….trycloudflare.com or leave blank for same host" />
+      <div id="step-connect" class="step">
+        <div id="status" class="bad">HUB OFFLINE</div>
+        <h1>ROVER VIEW</h1>
+        <p>Passthrough + robot POV. One tap to enter. Hub URL is saved after the first setup.</p>
+        <div id="hub-row">
+          <input id="hub-input" type="url" placeholder="https://….trycloudflare.com or leave blank for same host" />
+        </div>
+        <button id="enter" disabled>Enter Rover View</button>
+        <p class="hint">On Quest: open this page in Browser → tap Enter. Cast via Meta Horizon app for the second screen.</p>
       </div>
-      <button id="enter" disabled>Enter Rover View</button>
-      <p class="hint">On Quest: open this page in Browser → tap Enter. Cast via Meta Horizon app for the second screen.</p>
+      <div id="step-mode" class="step" style="display: none;">
+        <h1>SELECT MISSION</h1>
+        <button id="mode-explore" class="mode-btn">
+          Exploration Mode
+          <small>First-person rover view · head-tracked camera</small>
+        </button>
+        <button id="mode-rescue" class="mode-btn alt">
+          Rescue Mission
+          <small>Draw a route · holographic terrain · find the victim</small>
+        </button>
+        <button id="mode-back">back to hub setup</button>
+      </div>
     </div>
-    <div id="overlay-hud"><div class="big" id="hud-msg"></div></div>
+    <div id="overlay-hud">
+      <div class="big" id="hud-msg"></div>
+      <div class="sub" id="hud-sub"></div>
+      <button id="exit-btn">&larr; menu</button>
+    </div>
   </div>
   <script type="module" src="/src/main.js"></script>
 </body>
