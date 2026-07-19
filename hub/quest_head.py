@@ -44,6 +44,8 @@ PAN_SCALE = QCFG.get("pan_scale", 1.0)
 TILT_SCALE = QCFG.get("tilt_scale", 1.0)
 PAN_RANGE = QCFG.get("pan_range", 70)    # deg each side of center
 TILT_RANGE = QCFG.get("tilt_range", 45)
+PAN_CENTER = QCFG.get("pan_center", 90)   # servo angle = straight ahead
+TILT_CENTER = QCFG.get("tilt_center", 90)
 SLEW_DPS = QCFG.get("slew_deg_per_s", 180)  # servo speed limit (FR-7)
 CAM_URL = CONFIG.get("camera", {}).get("stream_url",
                                        "http://esp32cam.local/stream")
@@ -110,8 +112,8 @@ class HeadState:
         self.center_yaw = None
         self.center_pitch = None
         self.last_msg = 0.0
-        self.pan_out = 90.0   # slew-limited servo state
-        self.tilt_out = 90.0
+        self.pan_out = float(PAN_CENTER)   # slew-limited servo state
+        self.tilt_out = float(TILT_CENTER)
 
     def update(self, yaw, pitch):
         self.yaw, self.pitch = yaw, pitch
@@ -125,13 +127,13 @@ class HeadState:
 
     def targets(self):
         if self.center_yaw is None:
-            return 90.0, 90.0
+            return float(PAN_CENTER), float(TILT_CENTER)
         rel_yaw = ((self.yaw - self.center_yaw + 540) % 360) - 180
         rel_pitch = self.pitch - self.center_pitch
-        pan = 90 + PAN_SIGN * max(-PAN_RANGE, min(PAN_RANGE,
-                                                  rel_yaw * PAN_SCALE))
-        tilt = 90 + TILT_SIGN * max(-TILT_RANGE, min(TILT_RANGE,
-                                                     rel_pitch * TILT_SCALE))
+        pan = PAN_CENTER + PAN_SIGN * max(
+            -PAN_RANGE, min(PAN_RANGE, rel_yaw * PAN_SCALE))
+        tilt = TILT_CENTER + TILT_SIGN * max(
+            -TILT_RANGE, min(TILT_RANGE, rel_pitch * TILT_SCALE))
         return pan, tilt
 
 

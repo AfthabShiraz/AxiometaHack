@@ -35,10 +35,10 @@
     "roll_sign": 1
   },
   "drive": {
-    "max_speed": 190,
+    "max_speed": 210,
     "min_pwm": 85,
     "turn_gain": 2.0,
-    "keyboard_speed": 190
+    "keyboard_speed": 210
   },
   "camera": {
     "stream_url": "http://esp32cam.local/stream"
@@ -61,6 +61,8 @@
     "tilt_scale": 1.0,
     "pan_range": 170,
     "tilt_range": 45,
+    "pan_center": 76,
+    "tilt_center": 90,
     "slew_deg_per_s": 300
   }
 }
